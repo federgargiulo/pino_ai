@@ -1,15 +1,32 @@
-version: "3.9"
+# docker-compose.yaml  – versione senza la chiave `version:`
 services:
   generator:
     build: ./generator
-    volumes: [ "./shared-data:/data" ]
+    volumes:
+      - ./shared-data:/data
 
   ai-service:
     build: ./model
-    volumes: [ "./shared-data:/data" ]
-    depends_on: [ generator ]
-    ports: [ "5000:5000" ]   # per debug fuori dal cluster
+    volumes:
+      - ./shared-data:/data
+    depends_on:
+      - generator
+    ports:            # solo per debug dall'host
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/predict"]
+      interval: 10s
+      retries: 3
+      start_period: 10s
 
+# docker-compose.yml  (blocco java-service)
   java-service:
     build: ./java
-    depends_on: [ ai-service ]
+    depends_on:
+      - ai-service
+    entrypoint: ["sh","-c","while true; do java -cp /app/service.jar com.example.DiagnosysServicesController; sleep 10; done"]
+    healthcheck:
+      test: ["CMD-SHELL", "java -cp /app/service.jar com.example.DiagnosysServicesController | grep -q statusCode"]
+      interval: 30s
+      retries: 3
+      start_period: 15s
