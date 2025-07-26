@@ -1,0 +1,15 @@
+version: "3.9"
+services:
+  generator:
+    build: ./generator
+    volumes: [ "./shared-data:/data" ]
+
+  ai-service:
+    build: ./model
+    volumes: [ "./shared-data:/data" ]
+    depends_on: [ generator ]
+    ports: [ "5000:5000" ]   # per debug fuori dal cluster
+
+  java-service:
+    build: ./java
+    depends_on: [ ai-service ]
