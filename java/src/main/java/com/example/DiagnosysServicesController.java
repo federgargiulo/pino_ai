@@ -18,8 +18,8 @@ public class DiagnosysServicesController {
 
     // ====== DTOs (compatibili col requisito) ======
     public static class DiagnosysResultsTO {
-        public String statusCode;
-        public String statusDescription;
+        private String statusCode;
+        private String statusDescription;
 
         @Override
         public String toString() {
@@ -29,16 +29,26 @@ public class DiagnosysServicesController {
     }
 
     public static class DiagnosysEngineRequestTO {
-        private String[] values;
+        private String values[];
 
-        public String[] getValues() { return values; }
-        public void setValues(String[] values) { this.values = values; }
+        public String[] getValues() {
+            return values;
+        }
+
+        public void setValues(String[] values) {
+            this.values = values;
+        }
     }
 
     // ====== HTTP client ======
     private final HttpClient http;
     private final Gson gson = new Gson();
     private final String baseUrl;
+
+    // Costruttore di default (compatibile con requisito)
+    public DiagnosysServicesController() {
+        this(System.getenv().getOrDefault("DIAG_BASE_URL", "http://localhost:5001"));
+    }
 
     public DiagnosysServicesController(String baseUrl) {
         this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
@@ -64,59 +74,72 @@ public class DiagnosysServicesController {
     }
 
     // POST /diagnosys/engine { "values": [...] }
-    public DiagnosysResultsTO exeDiagnosys(DiagnosysEngineRequestTO dRequest) throws IOException, InterruptedException {
-        String body = gson.toJson(dRequest);
-        URI uri = URI.create(baseUrl + "/diagnosys/engine");
-        HttpRequest req = HttpRequest.newBuilder(uri)
-                .timeout(Duration.ofSeconds(5))
-                .header("Content-Type", "application/json")
-                .POST(HttpRequest.BodyPublishers.ofString(body))
-                .build();
-        HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
-        if (resp.statusCode() != 200) {
-            throw new IOException("POST " + uri + " -> HTTP " + resp.statusCode() + " body=" + resp.body());
+    public DiagnosysResultsTO exeDiagnosys(DiagnosysEngineRequestTO dRequest) {
+        try {
+            String body = gson.toJson(dRequest);
+            URI uri = URI.create(baseUrl + "/diagnosys/engine");
+            HttpRequest req = HttpRequest.newBuilder(uri)
+                    .timeout(Duration.ofSeconds(5))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(body))
+                    .build();
+            HttpResponse<String> resp = http.send(req, HttpResponse.BodyHandlers.ofString());
+            if (resp.statusCode() != 200) {
+                System.err.println("HTTP Error " + resp.statusCode() + ": " + resp.body());
+                return createErrorResult();
+            }
+            return gson.fromJson(resp.body(), DiagnosysResultsTO.class);
+        } catch (Exception e) {
+            System.err.println("Error in exeDiagnosys: " + e.getMessage());
+            return createErrorResult();
         }
-        return gson.fromJson(resp.body(), DiagnosysResultsTO.class);
+    }
+
+    private DiagnosysResultsTO createErrorResult() {
+        DiagnosysResultsTO result = new DiagnosysResultsTO();
+        result.statusCode = "ERROR";
+        result.statusDescription = "Service unavailable";
+        return result;
     }
 
     // ====== Esecuzione end-to-end ======
     public static void main(String[] args) throws Exception {
-        // Base URL del servizio Python (FastAPI)
-        // - se giri su host: http://localhost:5000
-        // - se giri in Docker accanto ad ai-service: http://ai-service:5000
-        String base = System.getenv().getOrDefault("DIAG_BASE_URL", "http://localhost:5000");
-        // Asset da analizzare (default M1)
-        String assetId = (args.length > 0 && args[0] != null && !args[0].isBlank())
-                ? args[0] : System.getenv().getOrDefault("ASSET_ID", "M1");
-        // Polling (ms). Se 0 o assente, esegue una sola diagnosi e termina.
+        // Test esatto come nel requisito (con 10 feature per compatibilità)
+        DiagnosysEngineRequestTO req = new DiagnosysEngineRequestTO();
+        String[] values = new String[]{"1", "3", "0", "0", "0", "0", "0", "0", "0", "0"};
+        req.values = values;
+
+        DiagnosysServicesController service = new DiagnosysServicesController();
+        System.out.println(service.exeDiagnosys(req));
+
+        // Execution loop per demo continua
+        String assetId = System.getenv().getOrDefault("ASSET_ID", "M1");
         long pollMs = 0L;
         try { pollMs = Long.parseLong(System.getenv().getOrDefault("DIAG_POLL_MS", "0")); } catch (Exception ignored) {}
 
-        DiagnosysServicesController service = new DiagnosysServicesController(base);
+        if (pollMs > 0) {
+            System.out.println("[JAVA] Starting continuous monitoring for asset " + assetId + " every " + pollMs + "ms");
+            while (true) {
+                try {
+                    // 1) prendo i values per l'asset
+                    String[] fetchedValues = service.fetchValues(assetId);
 
-        while (true) {
-            try {
-                // 1) prendo i values per l'asset
-                String[] values = service.fetchValues(assetId);
+                    // 2) chiamo la diagnosi (POST /diagnosys/engine)
+                    DiagnosysEngineRequestTO liveReq = new DiagnosysEngineRequestTO();
+                    liveReq.setValues(fetchedValues);
+                    DiagnosysResultsTO res = service.exeDiagnosys(liveReq);
 
-                // 2) chiamo la diagnosi (POST /diagnosys/engine)
-                DiagnosysEngineRequestTO req = new DiagnosysEngineRequestTO();
-                req.setValues(values);
-                DiagnosysResultsTO res = service.exeDiagnosys(req);
+                    System.out.println("[JAVA] asset=" + assetId + " -> " + res +
+                        " (features: " + fetchedValues.length + ", score: " + 
+                        (res.statusCode != null && res.statusCode.equals("1") ? "ANOMALY" : "OK") + ")");
 
-                System.out.println("[JAVA] asset=" + assetId + " -> " + res);
+                } catch (Exception e) {
+                    System.err.println("[JAVA] Errore: " + e.getMessage());
+                }
 
-            } catch (IOException ioe) {
-                System.err.println("[JAVA] Errore HTTP: " + ioe.getMessage());
-            } catch (InterruptedException ie) {
-                Thread.currentThread().interrupt();
-                break;
-            } catch (Exception e) {
-                System.err.println("[JAVA] Errore: " + e.getMessage());
+                Thread.sleep(pollMs);
             }
-
-            if (pollMs <= 0) break;
-            Thread.sleep(pollMs);
         }
     }
 }
+
