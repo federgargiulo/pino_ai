@@ -39,7 +39,7 @@ services:
     volumes:
       - ./shared-data:/data
     ports:
-      - "5000:5000"
+      - "5001:5000"
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:5000/healthz"]
       interval: 10s
@@ -59,3 +59,4 @@ services:
       - ASSET_ID=M1
       - DIAG_POLL_MS=10000   # ogni 10s prende values e invia diagnosi
     restart: unless-stopped
+
