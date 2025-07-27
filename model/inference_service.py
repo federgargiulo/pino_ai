@@ -17,6 +17,7 @@ import os, math, glob
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 import numpy as np
 import pandas as pd
@@ -268,3 +269,19 @@ def api_features(asset_id: str = Query(...), window_s: Optional[int] = Query(DEF
 @app.get("/healthz")
 def healthz():
     return {"status": "ok"}
+
+@app.get("/faults")
+def api_faults():
+    """Endpoint per monitorare lo stato dei guasti nel generator"""
+    try:
+        # Legge il file di stato condiviso (se esiste)
+        status_file = os.path.join(os.path.dirname(DATA_DIR), "demo_status.json")
+        if os.path.exists(status_file):
+            import json
+            with open(status_file, 'r') as f:
+                return json.load(f)
+        else:
+            return {"message": "Status file not available", "faults": []}
+    except Exception as e:
+        return {"message": "Error reading status", "error": str(e), "faults": []}
+
